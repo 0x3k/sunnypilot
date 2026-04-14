@@ -40,6 +40,7 @@ from openpilot.system.loggerd.xattr_cache import getxattr, setxattr
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.version import get_build_metadata
 from openpilot.system.hardware.hw import Paths
+from openpilot.sunnypilot.private_mode import is_private_mode
 
 
 ATHENA_HOST = os.getenv('ATHENA_HOST', 'wss://athena.comma.ai')
@@ -191,6 +192,8 @@ def handle_long_poll(ws: WebSocket, exit_event: threading.Event | None) -> None:
   try:
     while not end_event.wait(0.1):
       if exit_event is not None and exit_event.is_set():
+        end_event.set()
+      if is_private_mode():
         end_event.set()
   except (KeyboardInterrupt, SystemExit):
     end_event.set()
@@ -917,6 +920,10 @@ def main(exit_event: threading.Event | None = None):
   conn_start = None
   conn_retries = 0
   while exit_event is None or not exit_event.is_set():
+    if is_private_mode():
+      time.sleep(5)
+      continue
+
     try:
       if conn_start is None:
         conn_start = time.monotonic()

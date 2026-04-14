@@ -14,6 +14,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.system.version import get_build_metadata, get_version
 
 from openpilot.sunnypilot.sunnylink.api import UNREGISTERED_SUNNYLINK_DONGLE_ID
+from openpilot.sunnypilot.private_mode import is_private_mode
 
 CRASHES_DIR = Paths.crash_log_root()
 
@@ -28,6 +29,9 @@ class SentryProject(Enum):
 def report_tombstone(fn: str, message: str, contents: str) -> None:
   cloudlog.error({'tombstone': message})
 
+  if is_private_mode():
+    return
+
   with sentry_sdk.configure_scope() as scope:
     set_user()
     scope.set_extra("tombstone_fn", fn)
@@ -41,6 +45,9 @@ def capture_exception(*args, **kwargs) -> None:
 
   try:
     save_exception(traceback.format_exc())
+
+    if is_private_mode():
+      return
 
     set_user()
     sentry_sdk.capture_exception(*args, **kwargs)
@@ -73,6 +80,9 @@ def save_exception(content: str) -> None:
 
 
 def capture_fingerprint_mock() -> None:
+  if is_private_mode():
+    return
+
   try:
     set_user()
     message = "car doesn't match any fingerprints"
@@ -83,6 +93,9 @@ def capture_fingerprint_mock() -> None:
 
 
 def capture_fingerprint(candidate: str, car_name: str) -> None:
+  if is_private_mode():
+    return
+
   try:
     set_user()
     sentry_sdk.set_tag("carFingerprint", candidate)

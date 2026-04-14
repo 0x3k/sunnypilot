@@ -8,6 +8,7 @@ from openpilot.system.manager.process import launcher
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware import HARDWARE
 from openpilot.system.version import get_build_metadata
+from openpilot.sunnypilot.private_mode import is_private_mode
 
 ATHENA_MGR_PID_PARAM = "AthenadPid"
 
@@ -31,6 +32,9 @@ def manage_athenad(dongle_id_param, pid_param, process_name, target):
 
   try:
     while 1:
+      if is_private_mode():
+        time.sleep(5)
+        continue
       cloudlog.info(f"starting {process_name} daemon")
       proc = Process(name=process_name, target=launcher, args=(target, process_name))
       proc.start()

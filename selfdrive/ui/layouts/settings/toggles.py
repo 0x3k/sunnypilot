@@ -8,6 +8,7 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.widgets import DialogResult
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.sunnypilot.private_mode import is_private_mode, set_private_mode
 
 if gui_app.sunnypilot_ui():
   from openpilot.system.ui.sunnypilot.widgets.list_view import toggle_item_sp as toggle_item
@@ -140,6 +141,18 @@ class TogglesLayout(Widget):
         self._toggles["LongitudinalPersonality"] = self._long_personality_setting
 
     self._update_experimental_mode_icon()
+
+    # Private Mode toggle (file-based, not a Param)
+    self._private_mode_toggle = toggle_item(
+      lambda: tr("Private Mode"),
+      lambda: tr("Block all remote data transmission including uploads, crash reports, and cloud connections. "
+                 "Local logging continues for on-device diagnostics."),
+      is_private_mode(),
+      callback=self._private_mode_callback,
+      icon="lock_closed.png",
+    )
+    self._toggles["PrivateMode"] = self._private_mode_toggle
+
     self._scroller = Scroller(list(self._toggles.values()), line_separator=True, spacing=0)
 
     ui_state.add_engaged_transition_callback(self._update_toggles)
@@ -204,6 +217,9 @@ class TogglesLayout(Widget):
     for param in self._toggle_defs:
       self._toggles[param].action_item.set_state(self._params.get_bool(param))
 
+    # refresh private mode toggle from file
+    self._private_mode_toggle.action_item.set_state(is_private_mode())
+
     # these toggles need restart, block while engaged
     for toggle_def in self._toggle_defs:
       if self._toggle_defs[toggle_def][3] and toggle_def not in self._locked_toggles:
@@ -235,6 +251,9 @@ class TogglesLayout(Widget):
     else:
       self._update_experimental_mode_icon()
       self._params.put_bool("ExperimentalMode", state)
+
+  def _private_mode_callback(self, state: bool):
+    set_private_mode(state)
 
   def _toggle_callback(self, state: bool, param: str):
     if param == "ExperimentalMode":

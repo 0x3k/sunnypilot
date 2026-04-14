@@ -31,6 +31,7 @@ import cereal.messaging as messaging
 from openpilot.sunnypilot.selfdrive.car.sync_car_list_param import update_car_list_param
 from openpilot.sunnypilot.sunnylink.api import SunnylinkApi
 from openpilot.sunnypilot.sunnylink.utils import sunnylink_need_register, sunnylink_ready, get_param_as_byte, save_param_from_base64_encoded_string
+from openpilot.sunnypilot.private_mode import is_private_mode
 
 SUNNYLINK_ATHENA_HOST = os.getenv('SUNNYLINK_ATHENA_HOST', 'wss://ws.stg.api.sunnypilot.ai')
 HANDLER_THREADS = int(os.getenv('HANDLER_THREADS', "4"))
@@ -79,6 +80,11 @@ def handle_long_poll(ws: WebSocket, exit_event: threading.Event | None) -> None:
     while not end_event.wait(0.1):
       if not sunnylink_ready(params):
         cloudlog.warning("Exiting sunnylinkd.handle_long_poll as SunnylinkEnabled is False")
+        break
+
+      if is_private_mode():
+        end_event.set()
+        comma_prime_cellular_end_event.set()
         break
 
       sm.update(0)
@@ -338,7 +344,7 @@ def main(exit_event: threading.Event | None = None):
   ws_uri = f"{SUNNYLINK_ATHENA_HOST}"
   conn_start = None
   conn_retries = 0
-  while (exit_event is None or not exit_event.is_set()) and sunnylink_ready(params):
+  while (exit_event is None or not exit_event.is_set()) and sunnylink_ready(params) and not is_private_mode():
     try:
       if conn_start is None:
         conn_start = time.monotonic()

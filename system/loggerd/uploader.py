@@ -18,6 +18,7 @@ from openpilot.common.realtime import set_core_affinity
 from openpilot.system.hardware.hw import Paths
 from openpilot.system.loggerd.xattr_cache import getxattr, setxattr
 from openpilot.common.swaglog import cloudlog
+from openpilot.sunnypilot.private_mode import is_private_mode
 
 NetworkType = log.DeviceState.NetworkType
 UPLOAD_ATTR_NAME = 'user.upload'
@@ -250,6 +251,12 @@ def main(exit_event: threading.Event | None = None) -> None:
   backoff = 0.1
   while not exit_event.is_set():
     sm.update(0)
+
+    if is_private_mode():
+      if allow_sleep:
+        time.sleep(5)
+      continue
+
     offroad = params.get_bool("IsOffroad")
     network_type = sm['deviceState'].networkType if not force_wifi else NetworkType.wifi
     if network_type == NetworkType.none:
