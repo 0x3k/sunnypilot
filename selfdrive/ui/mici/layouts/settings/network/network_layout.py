@@ -1,3 +1,4 @@
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.widgets.tailscale_dialog import TailscaleDialog
 from openpilot.sunnypilot.tailscale import (
   is_tailscale_enabled, is_tailscale_install_requested, is_tailscale_installed,
@@ -17,6 +18,7 @@ from openpilot.system.ui.lib.wifi_manager import WifiManager, Network, MeteredTy
 class NetworkLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
+    cloudlog.warning("TAILSCALE_DEBUG: NetworkLayoutMici.__init__ entered (build with tailscale section)")
 
     self._wifi_manager = WifiManager()
     self._wifi_manager.set_active(False)
@@ -106,6 +108,7 @@ class NetworkLayoutMici(NavScroller):
       self._tailscale_install_btn,
       self._tailscale_signin_btn,
     ])
+    cloudlog.warning(f"TAILSCALE_DEBUG: scroller now has {len(self._items)} items (expect 10)")
 
     # Set initial config
     roaming_enabled = ui_state.params.get_bool("GsmRoaming")
