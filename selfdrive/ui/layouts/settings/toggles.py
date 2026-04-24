@@ -1,23 +1,17 @@
 from cereal import log
 from openpilot.common.params import Params, UnknownKeyName
 from openpilot.system.ui.widgets import Widget
-from openpilot.system.ui.widgets.list_view import button_item, multiple_button_item, toggle_item
+from openpilot.system.ui.widgets.list_view import multiple_button_item, toggle_item
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.widgets import DialogResult
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.selfdrive.ui.widgets.tailscale_dialog import TailscaleDialog
-from openpilot.sunnypilot.tailscale import (
-  is_tailscale_enabled, is_tailscale_installed, is_tailscale_install_requested,
-  request_tailscale_install, set_tailscale_enabled,
-)
 
 if gui_app.sunnypilot_ui():
   from openpilot.system.ui.sunnypilot.widgets.list_view import toggle_item_sp as toggle_item
   from openpilot.system.ui.sunnypilot.widgets.list_view import multiple_button_item_sp as multiple_button_item
-  from openpilot.system.ui.sunnypilot.widgets.list_view import button_item_sp as button_item
 
 PERSONALITY_TO_INT = log.LongitudinalPersonality.schema.enumerants
 
@@ -146,41 +140,6 @@ class TogglesLayout(Widget):
         self._toggles["LongitudinalPersonality"] = self._long_personality_setting
 
     self._update_experimental_mode_icon()
-
-    # Tailscale (file-based flag, not a Param — mirrors private_mode precedent)
-    tailscale_desc = tr_noop(
-      "Connect this device to your tailnet. When enabled, the device installs Tailscale on first run " +
-      "and reconnects automatically after reboot. SSH is enabled via Tailscale SSH.")
-    self._tailscale_toggle = toggle_item(
-      lambda: tr("Tailscale"),
-      lambda: tr(tailscale_desc),
-      is_tailscale_enabled(),
-      callback=self._tailscale_toggle_callback,
-      icon="network.png",
-    )
-    self._toggles["TailscaleEnabled"] = self._tailscale_toggle
-
-    tailscale_install_desc = tr_noop(
-      "Download and install the Tailscale binaries (~15 MB) to /data/tailscale/bin. " +
-      "Requires a network connection.")
-    self._tailscale_install_btn = button_item(
-      lambda: tr("Install Tailscale"),
-      lambda: tr("INSTALLING...") if is_tailscale_install_requested() else tr("INSTALL"),
-      lambda: tr(tailscale_install_desc),
-      callback=self._tailscale_install_callback,
-    )
-    self._tailscale_install_btn.set_visible(lambda: is_tailscale_enabled() and not is_tailscale_installed())
-    self._toggles["TailscaleInstall"] = self._tailscale_install_btn
-
-    self._tailscale_signin_btn = button_item(
-      lambda: tr("Sign in to Tailscale"),
-      lambda: tr("SIGN IN"),
-      lambda: tr("Open the sign-in QR code to authenticate this device with your tailnet."),
-      callback=self._tailscale_signin_callback,
-    )
-    self._tailscale_signin_btn.set_visible(lambda: is_tailscale_enabled() and is_tailscale_installed())
-    self._toggles["TailscaleSignIn"] = self._tailscale_signin_btn
-
     self._scroller = Scroller(list(self._toggles.values()), line_separator=True, spacing=0)
 
     ui_state.add_engaged_transition_callback(self._update_toggles)
@@ -245,9 +204,6 @@ class TogglesLayout(Widget):
     for param in self._toggle_defs:
       self._toggles[param].action_item.set_state(self._params.get_bool(param))
 
-    # refresh tailscale toggle from file
-    self._tailscale_toggle.action_item.set_state(is_tailscale_enabled())
-
     # these toggles need restart, block while engaged
     for toggle_def in self._toggle_defs:
       if self._toggle_defs[toggle_def][3] and toggle_def not in self._locked_toggles:
@@ -291,12 +247,3 @@ class TogglesLayout(Widget):
 
   def _set_longitudinal_personality(self, button_index: int):
     self._params.put("LongitudinalPersonality", button_index)
-
-  def _tailscale_toggle_callback(self, state: bool):
-    set_tailscale_enabled(state)
-
-  def _tailscale_install_callback(self):
-    request_tailscale_install()
-
-  def _tailscale_signin_callback(self):
-    gui_app.push_widget(TailscaleDialog())
