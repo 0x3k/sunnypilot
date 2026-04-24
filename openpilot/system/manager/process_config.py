@@ -163,6 +163,9 @@ procs = [
   DaemonProcess("manage_sunnylinkd", "openpilot.sunnypilot.sunnylink.athena.manage_sunnylinkd", "SunnylinkdPid"),
   PythonProcess("sunnylink_registration_manager", "openpilot.sunnypilot.sunnylink.registration_manager", sunnylink_need_register_shim),
   PythonProcess("statsd_sp", "openpilot.sunnypilot.sunnylink.statsd", and_(always_run, sunnylink_ready_shim)),
+
+  # tailscale — supervisor self-gates on /data/tailscale/enabled (file-based, not a Param)
+  PythonProcess("manage_tailscaled", "openpilot.sunnypilot.system.tailscaled.manage_tailscaled", always_run),
 ]
 
 # sunnypilot
