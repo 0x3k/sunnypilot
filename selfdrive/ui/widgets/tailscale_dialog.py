@@ -19,8 +19,7 @@ from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.lib.wrap_text import wrap_text
-from openpilot.system.ui.widgets import Widget
-from openpilot.system.ui.widgets.button import IconButton
+from openpilot.system.ui.widgets.nav_widget import NavWidget
 from openpilot.sunnypilot.tailscale import (
   TAILSCALE_BIN,
   TAILSCALE_SOCKET,
@@ -33,13 +32,12 @@ LOGIN_URL_RE = re.compile(r"https://login\.tailscale\.com/\S+")
 STATUS_POLL_INTERVAL = 1.0
 
 
-class TailscaleDialog(Widget):
+class TailscaleDialog(NavWidget):
   """Runs `tailscale up`, captures the login URL, renders QR until signed in."""
 
   def __init__(self):
     super().__init__()
-    self._close_btn = IconButton(gui_app.texture("icons/close.png", 80, 80))
-    self._close_btn.set_click_callback(self._on_close)
+    self.set_rect(rl.Rectangle(0, 0, gui_app.width, gui_app.height))
 
     self._qr_texture: rl.Texture | None = None
     self._login_url: str = ""
@@ -49,6 +47,7 @@ class TailscaleDialog(Widget):
     self._stderr_thread: threading.Thread | None = None
     self._last_poll = 0.0
     self._lock = threading.Lock()
+    self._auto_closed = False
 
     if not is_tailscale_installed():
       self._status_text = tr("Tailscale is not installed yet. Install it first.")
@@ -57,7 +56,6 @@ class TailscaleDialog(Widget):
     self._start_up()
 
   def _start_up(self) -> None:
-    # Best-effort hostname — tailscaled may already know it from state, so this is a fallback.
     try:
       self._proc = subprocess.Popen(
         [TAILSCALE_BIN, f"--socket={TAILSCALE_SOCKET}", "up", "--ssh"],
@@ -117,7 +115,8 @@ class TailscaleDialog(Widget):
     except Exception:
       cloudlog.exception("TailscaleDialog: QR generation failed")
 
-  def _poll_state(self) -> None:
+  def _update_state(self):
+    super()._update_state()
     now = time.monotonic()
     if now - self._last_poll < STATUS_POLL_INTERVAL:
       return
@@ -125,15 +124,11 @@ class TailscaleDialog(Widget):
     state = get_backend_state()
     with self._lock:
       self._backend_state = state
-    if state == "Running":
+    if state == "Running" and not self._auto_closed and not self.is_dismissing:
+      self._auto_closed = True
       with self._lock:
         self._status_text = tr("Signed in. Tailscale is active.")
-      # let the user see the success state briefly before auto-close
-      gui_app.pop_widget()
-
-  def _on_close(self) -> None:
-    self._shutdown()
-    gui_app.pop_widget()
+      self.dismiss(self._shutdown)
 
   def _shutdown(self) -> None:
     if self._proc and self._proc.poll() is None:
@@ -146,48 +141,60 @@ class TailscaleDialog(Widget):
         pass
     # If the user cancelled without signing in, tell tailscaled to stop the login attempt
     # so the next sign-in starts fresh.
-    try:
-      run_tailscale_cli(["logout"], timeout=3)
-    except Exception:
-      pass
+    if self._backend_state != "Running":
+      try:
+        run_tailscale_cli(["logout"], timeout=3)
+      except Exception:
+        pass
 
   def _render(self, rect: rl.Rectangle) -> int:
-    rl.clear_background(rl.Color(224, 224, 224, 255))
-    self._poll_state()
+    rl.draw_rectangle_rec(rect, rl.Color(20, 20, 20, 255))
 
-    margin = 70
+    margin = 60
     content = rl.Rectangle(rect.x + margin, rect.y + margin, rect.width - 2 * margin, rect.height - 2 * margin)
 
-    close_size = 80
-    pad = 20
-    self._close_btn.render(rl.Rectangle(content.x - pad, content.y - pad, close_size + pad * 2, close_size + pad * 2))
+    # Left half: title + status + URL. Right half: QR.
+    left_w = int(content.width * 0.5 - 30)
+    right_x = int(content.x + content.width * 0.5 + 30)
+    right_w = int(content.width - (right_x - content.x))
 
-    y = content.y + close_size + 40
-    title_font = gui_app.font(FontWeight.NORMAL)
+    # Title
+    title_font = gui_app.font(FontWeight.BOLD)
     title = tr("Sign in to Tailscale")
-    left_width = int(content.width * 0.5 - 15)
+    y = content.y + 40
+    title_lines = wrap_text(title_font, title, 76, left_w)
+    rl.draw_text_ex(title_font, "\n".join(title_lines), rl.Vector2(content.x, y), 76, 0.0, rl.WHITE)
+    y += len(title_lines) * 86 + 40
 
-    title_wrapped = wrap_text(title_font, title, 75, left_width)
-    rl.draw_text_ex(title_font, "\n".join(title_wrapped), rl.Vector2(content.x, y), 75, 0.0, rl.BLACK)
-    y += len(title_wrapped) * 75 + 60
-
-    body_font = gui_app.font(FontWeight.BOLD)
+    # Status
+    status_font = gui_app.font(FontWeight.NORMAL)
     with self._lock:
       status = self._status_text
       url = self._login_url
-    status_wrapped = wrap_text(body_font, status, 40, left_width)
-    rl.draw_text_ex(body_font, "\n".join(status_wrapped), rl.Vector2(content.x, y), 40, 0.0, rl.BLACK)
-    y += len(status_wrapped) * 40 + 40
+    status_lines = wrap_text(status_font, status, 40, left_w)
+    rl.draw_text_ex(status_font, "\n".join(status_lines), rl.Vector2(content.x, y), 40, 0.0, rl.Color(220, 220, 220, 255))
+    y += len(status_lines) * 48 + 30
 
+    # URL (small, wrappable)
     if url:
-      url_wrapped = wrap_text(body_font, url, 28, left_width)
-      rl.draw_text_ex(body_font, "\n".join(url_wrapped), rl.Vector2(content.x, y), 28, 0.0, rl.Color(60, 60, 60, 255))
+      url_font = gui_app.font(FontWeight.NORMAL)
+      url_lines = wrap_text(url_font, url, 26, left_w)
+      rl.draw_text_ex(url_font, "\n".join(url_lines), rl.Vector2(content.x, y), 26, 0.0, rl.Color(160, 160, 160, 255))
 
-    # QR on the right
-    right_width = content.width // 2 - 20
-    qr_size = int(min(right_width, content.height) - 40)
-    qr_x = int(content.x + left_width + 40 + (right_width - qr_size) // 2)
-    qr_y = int(content.y)
+    # Hint at the bottom: swipe down to close
+    hint_font = gui_app.font(FontWeight.NORMAL)
+    hint = tr("Swipe down to close")
+    hint_size = measure_text_cached(hint_font, hint, 30)
+    rl.draw_text_ex(
+      hint_font, hint,
+      rl.Vector2(content.x, content.y + content.height - hint_size.y - 10),
+      30, 0.0, rl.Color(120, 120, 120, 255),
+    )
+
+    # QR on the right, centered vertically, square
+    qr_size = min(right_w, int(content.height) - 80)
+    qr_x = right_x + (right_w - qr_size) // 2
+    qr_y = int(content.y + (content.height - qr_size) / 2)
     self._render_qr(rl.Rectangle(qr_x, qr_y, qr_size, qr_size))
 
     return -1
@@ -196,18 +203,22 @@ class TailscaleDialog(Widget):
     with self._lock:
       tex = self._qr_texture
     if not tex:
-      rl.draw_rectangle_rounded(rect, 0.1, 20, rl.Color(240, 240, 240, 255))
-      font = gui_app.font(FontWeight.BOLD)
+      rl.draw_rectangle_rounded(rect, 0.05, 20, rl.Color(50, 50, 50, 255))
+      font = gui_app.font(FontWeight.NORMAL)
       msg = tr("Generating sign-in link...")
       size = measure_text_cached(font, msg, 30)
       rl.draw_text_ex(
         font, msg,
         rl.Vector2(rect.x + (rect.width - size.x) // 2, rect.y + rect.height // 2 - 15),
-        30, 0.0, rl.Color(80, 80, 80, 255),
+        30, 0.0, rl.Color(180, 180, 180, 255),
       )
       return
+    # White background padding around QR for scan reliability
+    rl.draw_rectangle_rec(rect, rl.WHITE)
+    pad = int(rect.width * 0.04)
+    inner = rl.Rectangle(rect.x + pad, rect.y + pad, rect.width - pad * 2, rect.height - pad * 2)
     source = rl.Rectangle(0, 0, tex.width, tex.height)
-    rl.draw_texture_pro(tex, source, rect, rl.Vector2(0, 0), 0, rl.WHITE)
+    rl.draw_texture_pro(tex, source, inner, rl.Vector2(0, 0), 0, rl.WHITE)
 
   def __del__(self):
     self._shutdown()
