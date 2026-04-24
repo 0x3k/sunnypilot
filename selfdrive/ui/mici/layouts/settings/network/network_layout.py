@@ -1,3 +1,8 @@
+from openpilot.selfdrive.ui.widgets.tailscale_dialog import TailscaleDialog
+from openpilot.sunnypilot.tailscale import (
+  is_tailscale_enabled, is_tailscale_install_requested, is_tailscale_installed,
+  request_tailscale_install, set_tailscale_enabled,
+)
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.layouts.settings.network import WifiNetworkButton
 from openpilot.selfdrive.ui.mici.layouts.settings.network.wifi_ui import WifiUIMici
@@ -75,6 +80,17 @@ class NetworkLayoutMici(NavScroller):
     # ******** Cellular metered toggle ********
     self._cellular_metered_btn = BigParamControl("cellular metered", "GsmMetered", toggle_callback=self._toggle_cellular_metered)
 
+    # ******** Tailscale ********
+    self._tailscale_toggle_btn = BigToggle(
+      "tailscale",
+      initial_state=is_tailscale_enabled(),
+      toggle_callback=lambda state: set_tailscale_enabled(state),
+    )
+    self._tailscale_install_btn = BigButton("install tailscale", "install")
+    self._tailscale_install_btn.set_click_callback(lambda: request_tailscale_install())
+    self._tailscale_signin_btn = BigButton("sign in to tailscale", "sign in")
+    self._tailscale_signin_btn.set_click_callback(lambda: gui_app.push_widget(TailscaleDialog()))
+
     # Main scroller ----------------------------------
     self._scroller.add_widgets([
       self._wifi_button,
@@ -86,6 +102,9 @@ class NetworkLayoutMici(NavScroller):
       self._apn_btn,
       self._cellular_metered_btn,
       # */
+      self._tailscale_toggle_btn,
+      self._tailscale_install_btn,
+      self._tailscale_signin_btn,
     ])
 
     # Set initial config
@@ -102,6 +121,19 @@ class NetworkLayoutMici(NavScroller):
     self._roaming_btn.set_visible(show_cell_settings)
     self._apn_btn.set_visible(show_cell_settings)
     self._cellular_metered_btn.set_visible(show_cell_settings)
+
+    # Tailscale: refresh toggle state from the file flag, gate the action buttons
+    enabled = is_tailscale_enabled()
+    installed = is_tailscale_installed()
+    self._tailscale_toggle_btn.set_checked(enabled)
+    self._tailscale_install_btn.set_enabled(enabled and not installed)
+    if is_tailscale_install_requested():
+      self._tailscale_install_btn.set_value("installing...")
+    elif installed:
+      self._tailscale_install_btn.set_value("installed")
+    else:
+      self._tailscale_install_btn.set_value("install")
+    self._tailscale_signin_btn.set_enabled(enabled and installed)
 
   def show_event(self):
     super().show_event()
