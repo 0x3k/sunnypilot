@@ -1,3 +1,11 @@
+import threading
+import time
+
+from openpilot.selfdrive.ui.widgets.tailscale_dialog import TailscaleDialog
+from openpilot.sunnypilot.tailscale import (
+  get_self_ip, is_signed_in, is_tailscale_enabled, is_tailscale_install_requested, is_tailscale_installed,
+  request_tailscale_install, set_tailscale_enabled, uninstall_tailscale,
+)
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.layouts.settings.network import WifiNetworkButton
 from openpilot.selfdrive.ui.mici.layouts.settings.network.wifi_ui import WifiUIMici
@@ -75,6 +83,27 @@ class NetworkLayoutMici(NavScroller):
     # ******** Cellular metered toggle ********
     self._cellular_metered_btn = BigParamControl("cellular metered", "GsmMetered", toggle_callback=self._toggle_cellular_metered)
 
+    # ******** Tailscale ********
+    self._tailscale_toggle_btn = BigToggle(
+      "tailscale",
+      initial_state=is_tailscale_enabled(),
+      toggle_callback=lambda state: set_tailscale_enabled(state),
+    )
+    self._tailscale_install_btn = BigButton("install tailscale", "install")
+    self._tailscale_install_btn.set_click_callback(lambda: request_tailscale_install())
+    self._tailscale_uninstall_btn = BigButton("uninstall tailscale", "uninstall")
+    self._tailscale_uninstall_btn.set_click_callback(lambda: uninstall_tailscale())
+    self._tailscale_signin_btn = BigButton("sign in to tailscale", "sign in")
+    self._tailscale_signin_btn.set_click_callback(lambda: gui_app.push_widget(TailscaleDialog()))
+    self._tailscale_status_btn = BigButton("tailscale", "")
+
+    # Cached tailscale state refreshed off-thread so _update_state doesn't block on the CLI.
+    self._ts_lock = threading.Lock()
+    self._ts_signed_in = False
+    self._ts_self_ip = ""
+    self._ts_refresh_scheduled = 0.0
+    self._ts_refresh_interval = 3.0
+
     # Main scroller ----------------------------------
     self._scroller.add_widgets([
       self._wifi_button,
@@ -86,6 +115,11 @@ class NetworkLayoutMici(NavScroller):
       self._apn_btn,
       self._cellular_metered_btn,
       # */
+      self._tailscale_toggle_btn,
+      self._tailscale_install_btn,
+      self._tailscale_uninstall_btn,
+      self._tailscale_status_btn,
+      self._tailscale_signin_btn,
     ])
 
     # Set initial config
@@ -102,6 +136,31 @@ class NetworkLayoutMici(NavScroller):
     self._roaming_btn.set_visible(show_cell_settings)
     self._apn_btn.set_visible(show_cell_settings)
     self._cellular_metered_btn.set_visible(show_cell_settings)
+
+    # Tailscale: refresh toggle state from the file flag, swap visible buttons based on install / sign-in
+    enabled = is_tailscale_enabled()
+    installed = is_tailscale_installed()
+    self._refresh_tailscale_async(installed)
+    with self._ts_lock:
+      signed_in = self._ts_signed_in
+      self_ip = self._ts_self_ip
+    # A local toggle without a daemon round-trip is authoritative for the checkbox; the backend
+    # state only matters for which *other* buttons are visible.
+    self._tailscale_toggle_btn.set_checked(enabled)
+
+    self._tailscale_install_btn.set_visible(enabled and not installed)
+    if is_tailscale_install_requested():
+      self._tailscale_install_btn.set_value("installing...")
+    else:
+      self._tailscale_install_btn.set_value("install")
+
+    self._tailscale_uninstall_btn.set_visible(enabled and installed)
+
+    self._tailscale_signin_btn.set_visible(enabled and installed and not signed_in)
+
+    self._tailscale_status_btn.set_visible(enabled and installed and signed_in)
+    if signed_in:
+      self._tailscale_status_btn.set_value(self_ip or "connected")
 
   def show_event(self):
     super().show_event()
@@ -135,6 +194,27 @@ class NetworkLayoutMici(NavScroller):
 
   def _toggle_cellular_metered(self, checked: bool):
     self._wifi_manager.update_gsm_settings(ui_state.params.get_bool("GsmRoaming"), ui_state.params.get("GsmApn") or "", checked)
+
+  def _refresh_tailscale_async(self, installed: bool) -> None:
+    now = time.monotonic()
+    if now - self._ts_refresh_scheduled < self._ts_refresh_interval:
+      return
+    self._ts_refresh_scheduled = now
+
+    if not installed:
+      with self._ts_lock:
+        self._ts_signed_in = False
+        self._ts_self_ip = ""
+      return
+
+    def refresh():
+      signed_in = is_signed_in()
+      ip = get_self_ip() if signed_in else ""
+      with self._ts_lock:
+        self._ts_signed_in = signed_in
+        self._ts_self_ip = ip
+
+    threading.Thread(target=refresh, daemon=True).start()
 
   def _on_network_updated(self, networks: list[Network]):
     # Update tethering state
