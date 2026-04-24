@@ -18,7 +18,6 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.text_measure import measure_text_cached
-from openpilot.system.ui.lib.wrap_text import wrap_text
 from openpilot.system.ui.widgets.nav_widget import NavWidget
 from openpilot.sunnypilot.tailscale import (
   TAILSCALE_BIN,
@@ -148,53 +147,13 @@ class TailscaleDialog(NavWidget):
         pass
 
   def _render(self, rect: rl.Rectangle) -> int:
-    rl.draw_rectangle_rec(rect, rl.Color(20, 20, 20, 255))
+    rl.draw_rectangle_rec(rect, rl.BLACK)
 
-    margin = 60
-    content = rl.Rectangle(rect.x + margin, rect.y + margin, rect.width - 2 * margin, rect.height - 2 * margin)
-
-    # Left half: title + status + URL. Right half: QR.
-    left_w = int(content.width * 0.5 - 30)
-    right_x = int(content.x + content.width * 0.5 + 30)
-    right_w = int(content.width - (right_x - content.x))
-
-    # Title
-    title_font = gui_app.font(FontWeight.BOLD)
-    title = tr("Sign in to Tailscale")
-    y = content.y + 40
-    title_lines = wrap_text(title_font, title, 76, left_w)
-    rl.draw_text_ex(title_font, "\n".join(title_lines), rl.Vector2(content.x, y), 76, 0.0, rl.WHITE)
-    y += len(title_lines) * 86 + 40
-
-    # Status
-    status_font = gui_app.font(FontWeight.NORMAL)
-    with self._lock:
-      status = self._status_text
-      url = self._login_url
-    status_lines = wrap_text(status_font, status, 40, left_w)
-    rl.draw_text_ex(status_font, "\n".join(status_lines), rl.Vector2(content.x, y), 40, 0.0, rl.Color(220, 220, 220, 255))
-    y += len(status_lines) * 48 + 30
-
-    # URL (small, wrappable)
-    if url:
-      url_font = gui_app.font(FontWeight.NORMAL)
-      url_lines = wrap_text(url_font, url, 26, left_w)
-      rl.draw_text_ex(url_font, "\n".join(url_lines), rl.Vector2(content.x, y), 26, 0.0, rl.Color(160, 160, 160, 255))
-
-    # Hint at the bottom: swipe down to close
-    hint_font = gui_app.font(FontWeight.NORMAL)
-    hint = tr("Swipe down to close")
-    hint_size = measure_text_cached(hint_font, hint, 30)
-    rl.draw_text_ex(
-      hint_font, hint,
-      rl.Vector2(content.x, content.y + content.height - hint_size.y - 10),
-      30, 0.0, rl.Color(120, 120, 120, 255),
-    )
-
-    # QR on the right, centered vertically, square
-    qr_size = min(right_w, int(content.height) - 80)
-    qr_x = right_x + (right_w - qr_size) // 2
-    qr_y = int(content.y + (content.height - qr_size) / 2)
+    # Maximum square QR centered on screen. Fill the shorter dimension minus a small margin.
+    margin = 20
+    qr_size = int(min(rect.width, rect.height)) - 2 * margin
+    qr_x = int(rect.x + (rect.width - qr_size) / 2)
+    qr_y = int(rect.y + (rect.height - qr_size) / 2)
     self._render_qr(rl.Rectangle(qr_x, qr_y, qr_size, qr_size))
 
     return -1
