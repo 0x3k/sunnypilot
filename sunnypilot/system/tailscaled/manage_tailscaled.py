@@ -31,7 +31,8 @@ from openpilot.sunnypilot.tailscale import (
 )
 from openpilot.sunnypilot.system.tailscaled import installer
 
-DISABLED_POLL_INTERVAL = 30
+DISABLED_POLL_INTERVAL = 5
+RUNNING_POLL_INTERVAL = 3
 RESTART_BACKOFF = 5
 READINESS_TIMEOUT = 10
 
@@ -145,6 +146,24 @@ class _SignalForwarder:
     os._exit(0)
 
 
+def _stop_tailscaled(forwarder: "_SignalForwarder", call_down: bool) -> None:
+  """Bring the tailnet down (optional) and terminate the spawned tailscaled."""
+  if call_down and is_tailscale_installed():
+    try:
+      run_tailscale_cli(["down"], timeout=10)
+    except (subprocess.TimeoutExpired, OSError):
+      pass
+  if forwarder.proc and forwarder.proc.poll() is None:
+    try:
+      forwarder.proc.terminate()
+      forwarder.proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+      forwarder.proc.kill()
+    except OSError:
+      pass
+  forwarder.proc = None
+
+
 def main() -> None:
   setproctitle("manage_tailscaled")
   forwarder = _SignalForwarder()
@@ -154,13 +173,16 @@ def main() -> None:
       time.sleep(DISABLED_POLL_INTERVAL)
       continue
 
-    if is_tailscale_install_requested() or not is_tailscale_installed():
+    # Only install on explicit request. A missing binary without a request means the user
+    # uninstalled; idle until they ask for a reinstall.
+    if is_tailscale_install_requested():
       cloudlog.info("manage_tailscaled: installing tailscale binaries")
-      ok = installer.install()
+      installer.install()
       clear_tailscale_install_request()
-      if not ok:
-        time.sleep(DISABLED_POLL_INTERVAL)
-        continue
+
+    if not is_tailscale_installed():
+      time.sleep(DISABLED_POLL_INTERVAL)
+      continue
 
     if _existing_daemon_responsive():
       cloudlog.info("manage_tailscaled: adopting already-running tailscaled")
@@ -175,24 +197,38 @@ def main() -> None:
 
     if not _wait_for_socket(time.monotonic() + READINESS_TIMEOUT):
       cloudlog.warning("manage_tailscaled: socket never came up; restarting")
-      if forwarder.proc:
-        forwarder.proc.terminate()
-        forwarder.proc = None
+      _stop_tailscaled(forwarder, call_down=False)
       time.sleep(RESTART_BACKOFF)
       continue
 
     _try_login_if_needed()
 
-    if forwarder.proc is not None:
-      exitcode = forwarder.proc.wait()
-      cloudlog.event("manage_tailscaled.tailscaled_exited", exitcode=exitcode)
-      forwarder.proc = None
-      if forwarder.shutting_down:
+    # Supervise: react to runtime flag changes (disable / uninstall) without needing a manager restart.
+    while not forwarder.shutting_down:
+      if not is_tailscale_enabled():
+        cloudlog.info("manage_tailscaled: enabled flag cleared, disconnecting and stopping tailscaled")
+        _stop_tailscaled(forwarder, call_down=True)
         break
+      if not is_tailscale_installed():
+        cloudlog.info("manage_tailscaled: binaries removed, stopping tailscaled")
+        _stop_tailscaled(forwarder, call_down=False)
+        break
+      if forwarder.proc is not None:
+        try:
+          exitcode = forwarder.proc.wait(timeout=RUNNING_POLL_INTERVAL)
+          cloudlog.event("manage_tailscaled.tailscaled_exited", exitcode=exitcode)
+          forwarder.proc = None
+          break
+        except subprocess.TimeoutExpired:
+          continue
+      else:
+        if not _existing_daemon_responsive():
+          cloudlog.warning("manage_tailscaled: adopted tailscaled stopped responding; re-entering spawn loop")
+          break
+        time.sleep(RUNNING_POLL_INTERVAL)
+
+    if not forwarder.shutting_down:
       time.sleep(RESTART_BACKOFF)
-    else:
-      while not forwarder.shutting_down and is_tailscale_enabled() and _existing_daemon_responsive():
-        time.sleep(DISABLED_POLL_INTERVAL)
 
 
 if __name__ == "__main__":

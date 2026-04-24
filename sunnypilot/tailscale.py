@@ -7,6 +7,7 @@ same rationale as sunnypilot/private_mode.py.
 """
 import json
 import os
+import shutil
 import subprocess
 
 TAILSCALE_ROOT = "/data/tailscale"
@@ -114,3 +115,38 @@ def get_backend_state() -> str:
 
 def is_signed_in() -> bool:
   return get_backend_state() == "Running"
+
+
+def get_self_ip() -> str:
+  """Device's tailnet IPv4, empty string if unavailable."""
+  status = get_tailscale_status()
+  if not status:
+    return ""
+  self_info = status.get("Self") or {}
+  ips = self_info.get("TailscaleIPs") or []
+  for ip in ips:
+    if "." in ip:  # IPv4
+      return str(ip)
+  return str(ips[0]) if ips else ""
+
+
+def tailscale_down(timeout: float = 10.0) -> bool:
+  """Disconnect from the tailnet. Leaves tailscaled running. Returns True on success."""
+  if not is_tailscale_installed():
+    return False
+  try:
+    result = run_tailscale_cli(["down"], timeout=timeout)
+    return result.returncode == 0
+  except (subprocess.TimeoutExpired, OSError):
+    return False
+
+
+def uninstall_tailscale() -> bool:
+  """Remove the tailscale binaries directory. Returns True if something was removed."""
+  if not os.path.isdir(TAILSCALE_BIN_DIR):
+    return False
+  try:
+    shutil.rmtree(TAILSCALE_BIN_DIR)
+    return True
+  except OSError:
+    return False
