@@ -71,21 +71,37 @@ def _cleanup_stale() -> None:
 
 
 def _spawn_tailscaled() -> subprocess.Popen:
+  # Kernel TUN needs CAP_NET_ADMIN; rely on passwordless sudo for the AGNOS comma user.
   _ensure_state_dir()
   cmd = [
+    "sudo", "-n",
     TAILSCALED_BIN,
     f"--state={TAILSCALE_STATE_FILE}",
     f"--statedir={TAILSCALE_STATE_DIR}",
     f"--socket={TAILSCALE_SOCKET}",
-    "--tun=userspace-networking",
   ]
   cloudlog.info(f"manage_tailscaled: spawning {' '.join(cmd)}")
   return subprocess.Popen(cmd, start_new_session=False)
 
 
+def _open_socket_for_user() -> None:
+  """tailscaled runs as root, so chmod the control socket world-rw to keep
+  run_tailscale_cli usable from the comma user."""
+  if not os.path.exists(TAILSCALE_SOCKET):
+    return
+  try:
+    subprocess.run(["sudo", "-n", "chmod", "666", TAILSCALE_SOCKET], capture_output=True, timeout=5, check=False)
+  except (subprocess.TimeoutExpired, OSError) as e:
+    cloudlog.warning(f"manage_tailscaled: chmod socket failed: {e}")
+
+
 def _wait_for_socket(deadline: float) -> bool:
+  opened = False
   while time.monotonic() < deadline:
     if os.path.exists(TAILSCALE_SOCKET):
+      if not opened:
+        _open_socket_for_user()
+        opened = True
       try:
         result = run_tailscale_cli(["status", "--json"], timeout=2)
         if result.returncode == 0:
@@ -116,7 +132,7 @@ def _try_login_if_needed() -> None:
   cloudlog.info(f"manage_tailscaled: BackendState={state}, running `tailscale up` with stored authkey")
   try:
     result = run_tailscale_cli(
-      ["up", f"--authkey={authkey}", f"--hostname={_hostname()}", "--ssh", "--reset"],
+      ["up", f"--authkey={authkey}", f"--hostname={_hostname()}", "--ssh", "--reset", "--accept-dns=true"],
       timeout=60,
     )
     if result.returncode != 0:
