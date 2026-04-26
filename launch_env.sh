@@ -20,3 +20,6 @@ if [ -z "$AGNOS_VERSION" ]; then
 fi
 
 export STAGING_ROOT="/data/safe_staging"
+
+# Optional device-local backend overrides (not tracked in git).
+[ -f /data/personal_backend.env ] && . /data/personal_backend.env

@@ -17,10 +17,13 @@ from openpilot.sunnypilot.sunnylink.api import UNREGISTERED_SUNNYLINK_DONGLE_ID
 
 CRASHES_DIR = Paths.crash_log_root()
 
+SENTRY_DSN_DEFAULT = "https://186a6736b7927e5ae9b92c869ba81b6b@o1138119.ingest.us.sentry.io/4508660076052480"
+SENTRY_DSN = os.getenv("SENTRY_DSN", SENTRY_DSN_DEFAULT)
+
 
 class SentryProject(Enum):
   # python project
-  SELFDRIVE = "https://186a6736b7927e5ae9b92c869ba81b6b@o1138119.ingest.us.sentry.io/4508660076052480"
+  SELFDRIVE = SENTRY_DSN
   # native project
   SELFDRIVE_NATIVE = SELFDRIVE
 
@@ -115,6 +118,9 @@ def get_properties() -> tuple[str, str, str]:
 
 
 def init(project: SentryProject) -> bool:
+  if not project.value:
+    return False
+
   build_metadata = get_build_metadata()
 
   env = build_metadata.channel_type
