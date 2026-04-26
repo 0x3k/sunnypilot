@@ -167,6 +167,9 @@ procs = [
 
   # tailscale — supervisor self-gates on /data/tailscale/enabled (file-based, not a Param)
   PythonProcess("manage_tailscaled", "sunnypilot.system.tailscaled.manage_tailscaled", always_run),
+
+  # clat (464XLAT) — supervisor self-gates on /data/clat/enabled; only active when the cellular bearer is up
+  PythonProcess("manage_clatd", "sunnypilot.system.clatd.manage_clatd", always_run),
 ]
 
 # sunnypilot
