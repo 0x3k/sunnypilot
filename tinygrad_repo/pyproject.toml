@@ -71,7 +71,7 @@ linting = [
 # ]
 testing_minimal = [
   "numpy",
-  "torch==2.9.1",
+  "torch==2.13.0",
   "pytest",
   "pytest-xdist",
   "pytest-split",
@@ -82,7 +82,7 @@ testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate", 
 testing = [
   "tinygrad[testing_unit]",
   "pillow",
-  "onnx==1.19.0",
+  "onnx==1.22.0",
   "onnx2torch",
   "onnxruntime",
   "opencv-python",
